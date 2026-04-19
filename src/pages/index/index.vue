@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import { useUserStore } from '@/store/user'
 import { useFamilyStore } from '@/store/family'
 import { WebChart } from '@/components'
+import { generateShareCard, saveShareCard, generateInviteShare } from '@/utils/share'
+import { requestCommonSubscribes } from '@/utils/notify'
 
 const userStore = useUserStore()
 const familyStore = useFamilyStore()
@@ -22,7 +25,39 @@ onMounted(() => {
   }
   // 加载亲属数据
   familyStore.loadRelatives()
+  // 请求订阅消息授权
+  requestCommonSubscribes()
 })
+
+// ===== 分享功能 =====
+// 分享给微信好友
+onShareAppMessage(() => {
+  const inviteCode = uni.getStorageSync('inviteCode') || ''
+  const userName = userStore.user?.name || '家族互联用户'
+  return generateInviteShare(inviteCode, userName)
+})
+
+// 分享到朋友圈
+onShareTimeline(() => ({
+  title: `${userStore.user?.name || '我'}的家族蛛网 - 家族互联`,
+  query: `inviteCode=${uni.getStorageSync('inviteCode') || ''}`,
+}))
+
+// 保存蛛网分享卡片到相册
+async function onSaveShareCard() {
+  const stats = familyStore.stats
+  const imagePath = await generateShareCard({
+    userName: userStore.user?.name || '我',
+    relativeCount: stats.total,
+    verifiedCount: stats.verified,
+    familyCount: stats.familyCount,
+  })
+  if (imagePath) {
+    await saveShareCard(imagePath)
+  } else {
+    uni.showToast({ title: '生成分享卡片失败', icon: 'none' })
+  }
+}
 
 const stats = computed(() => familyStore.stats)
 const pendingCount = computed(() => familyStore.pendingVerifyCount)
@@ -51,9 +86,12 @@ function onViewNotifications() {
     <view class="nav-bar">
       <view class="nav-bar__title">家族互联</view>
       <view class="nav-bar__actions">
+        <view class="nav-bar__btn" @tap="onSaveShareCard">
+          <text class="nav-bar__icon">📤</text>
+        </view>
         <view class="nav-bar__btn" @tap="onViewNotifications">
           <text class="nav-bar__icon">🔔</text>
-          <view v-if="pendingCount > 0" class="nav-bar__badge">{{ pendingCount }}</view>
+          <view v-if="pendingCount > 0" class="nav-bar__badge animate-badge">{{ pendingCount }}</view>
         </view>
       </view>
     </view>
@@ -110,7 +148,8 @@ function onViewNotifications() {
         <text class="empty-state__text">还没有亲属，快去添加吧</text>
       </view>
       <view v-else class="relative-list">
-        <view v-for="r in familyStore.recentRelatives" :key="r.id" class="relative-item">
+        <view v-for="(r, idx) in familyStore.recentRelatives" :key="r.id"
+            :class="['relative-item', 'animate-appear', `stagger-${idx + 1}`]">
           <view class="avatar">{{ r.name[0] }}</view>
           <view class="relative-item__info">
             <text class="relative-item__name">{{ r.name }}</text>

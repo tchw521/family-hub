@@ -1,75 +1,190 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useFamilyStore } from '@/store/family'
+import * as echarts from 'echarts/core'
+import { GraphChart } from 'echarts/charts'
+import { TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
 
 const familyStore = useFamilyStore()
-const chartRef = ref<any>(null)
+const canvasId = 'web-chart-' + Date.now()
+let chartInstance: echarts.ECharts | null = null
+let isMoving = false
 
-// 蛛网数据（模拟，实际从 API 获取）
-const webData = computed(() => ({
-  nodes: [
-    { id: 'me', name: '我', category: 0, symbolSize: 50, x: 300, y: 300 },
-    ...familyStore.relatives.map((r, i) => ({
+// 构建蛛网 ECharts 配置
+const chartOption = computed(() => {
+  const relatives = familyStore.relatives
+
+  // 节点
+  const nodes: any[] = [
+    {
+      id: 'me',
+      name: '我',
+      symbolSize: 50,
+      category: 0,
+      itemStyle: { color: '#F28C38', shadowBlur: 12, shadowColor: 'rgba(242,140,56,0.4)' },
+      label: { fontSize: 14, fontWeight: 'bold', color: '#2D2A26' },
+    },
+    ...relatives.map((r) => ({
       id: r.id,
       name: r.name,
+      symbolSize: r.verified ? 38 : 26,
       category: r.side === 'spouse' ? 2 : 1,
-      symbolSize: r.verified ? 35 : 25,
-      itemStyle: r.verified ? {} : { opacity: 0.6 },
-      x: 300 + (Math.cos(i * 0.5) * 150),
-      y: 300 + (Math.sin(i * 0.5) * 150),
-    }))
-  ],
-  links: familyStore.relatives.map(r => ({
+      itemStyle: {
+        color: r.verified ? (r.side === 'spouse' ? '#F5A623' : '#7C6F5B') : '#C5C0BA',
+        opacity: r.verified ? 1 : 0.5,
+        borderWidth: r.verified ? 0 : 2,
+        borderColor: r.side === 'spouse' ? '#F28C38' : '#7C6F5B',
+        borderType: 'dashed' as const,
+      },
+      label: {
+        fontSize: r.verified ? 12 : 10,
+        color: r.verified ? '#2D2A26' : '#8C8580',
+      },
+    })),
+  ]
+
+  // 连线
+  const links: any[] = relatives.map((r) => ({
     source: 'me',
     target: r.id,
     value: r.relationLabel,
     lineStyle: {
       color: r.side === 'spouse' ? '#F28C38' : '#4A4540',
-      width: r.verified ? 2 : 1,
-      type: r.verified ? 'solid' : 'dashed',
-    }
-  })),
-  categories: [
-    { name: '自己', itemStyle: { color: '#F28C38' } },
-    { name: '血缘亲属', itemStyle: { color: '#4A4540' } },
-    { name: '配偶家族', itemStyle: { color: '#F28C38' } },
-  ]
-}))
+      width: r.verified ? 2.5 : 1,
+      type: r.verified ? 'solid' as const : 'dashed' as const,
+      curveness: 0.1,
+    },
+    label: {
+      show: true,
+      formatter: r.relationLabel,
+      fontSize: 10,
+      color: '#8C8580',
+      backgroundColor: 'rgba(250,248,245,0.85)',
+      padding: [2, 4],
+      borderRadius: 4,
+    },
+  }))
 
-// 点击节点
-function onNodeClick(node: any) {
-  if (node.id === 'me') return
-  uni.navigateTo({ url: `/pages/relatives/detail?id=${node.id}` })
+  return {
+    animation: true,
+    animationDuration: 1500,
+    animationEasingUpdate: 'quinticInOut',
+    series: [{
+      type: 'graph',
+      layout: 'force',
+      roam: true,
+      draggable: true,
+      force: {
+        repulsion: 200,
+        edgeLength: [80, 160],
+        gravity: 0.08,
+        friction: 0.6,
+        layoutAnimation: true,
+      },
+      categories: [
+        { name: '自己', itemStyle: { color: '#F28C38' } },
+        { name: '血缘亲属', itemStyle: { color: '#7C6F5B' } },
+        { name: '配偶家族', itemStyle: { color: '#F5A623' } },
+      ],
+      data: nodes,
+      links: links,
+      label: {
+        show: true,
+        position: 'bottom',
+        distance: 8,
+      },
+      emphasis: {
+        focus: 'adjacency',
+        lineStyle: { width: 4 },
+        itemStyle: { shadowBlur: 16, shadowColor: 'rgba(242,140,56,0.5)' },
+      },
+      tooltip: {
+        formatter: (params: any) => {
+          if (params.dataType === 'node') return params.name
+          if (params.dataType === 'edge') return params.data.value
+          return ''
+        },
+      },
+    }],
+  }
+})
+
+// 触摸事件转发给 ECharts
+function onTouchStart(e: any) {
+  isMoving = false
+  if (chartInstance) {
+    chartInstance.getZr().handler.dispatch('mousedown', e.mp?.detail || e.detail)
+  }
 }
 
-// 初始化图表
+function onTouchMove(e: any) {
+  isMoving = true
+  if (chartInstance) {
+    chartInstance.getZr().handler.dispatch('mousemove', e.mp?.detail || e.detail)
+  }
+}
+
+function onTouchEnd(e: any) {
+  if (chartInstance) {
+    chartInstance.getZr().handler.dispatch('mouseup', e.mp?.detail || e.detail)
+    if (!isMoving) {
+      chartInstance.getZr().handler.dispatch('click', e.mp?.detail || e.detail)
+    }
+  }
+}
+
+// 点击节点跳转
+function onChartClick(params: any) {
+  if (params.dataType === 'node' && params.data.id !== 'me') {
+    uni.navigateTo({ url: `/pages/relatives/detail?id=${params.data.id}` })
+  }
+}
+
 onMounted(() => {
-  // TODO: 使用 limason-echarts-uniapp 初始化
-  console.log('蛛网初始化', webData.value)
+  // 使用 uni-app 的 canvas 2d 接口初始化
+  const query = uni.createSelectorQuery()
+  query.select(`#${canvasId}`).fields({ node: true, size: true }).exec((res) => {
+    if (!res || !res[0] || !res[0].node) {
+      console.warn('Canvas node not found, fallback to CSS layout')
+      return
+    }
+    const canvas = res[0].node
+    const ctx = canvas.getContext('2d')
+    const dpr = uni.getSystemInfoSync().pixelRatio
+    canvas.width = res[0].width * dpr
+    canvas.height = res[0].height * dpr
+
+    chartInstance = echarts.init(canvas, null, {
+      width: res[0].width,
+      height: res[0].height,
+      devicePixelRatio: dpr,
+    })
+
+    chartInstance.setOption(chartOption.value)
+    chartInstance.on('click', onChartClick)
+  })
 })
 </script>
 
 <template>
   <view class="web-chart">
+    <!-- ECharts Canvas -->
     <view class="chart-container">
-      <!-- 占位：实际使用 ECharts -->
-      <view class="chart-placeholder">
-        <view class="node-center">
-          <text class="node-center__icon">👤</text>
-          <text class="node-center__name">我</text>
-        </view>
-        <view class="node-orbit">
-          <view v-for="r in familyStore.relatives.slice(0, 8)" :key="r.id"
-            :class="['node-item', `node-item--${r.side}`, !r.verified && 'node-item--unverified']"
-            @tap="onNodeClick(r)">
-            <text class="node-item__icon">{{ r.name[0] }}</text>
-            <text class="node-item__name">{{ r.name }}</text>
-            <text class="node-item__relation">{{ r.relationLabel }}</text>
-          </view>
-        </view>
-      </view>
+      <canvas
+        :id="canvasId"
+        :canvas-id="canvasId"
+        class="chart-canvas"
+        type="2d"
+        @touchstart="onTouchStart"
+        @touchmove="onTouchMove"
+        @touchend="onTouchEnd"
+      ></canvas>
     </view>
 
+    <!-- 图例 -->
     <view class="legend">
       <view class="legend-item">
         <view class="legend-line legend-line--blood"></view>
@@ -88,68 +203,69 @@ onMounted(() => {
         <text>未验证</text>
       </view>
     </view>
+
+    <!-- 操作提示 -->
+    <view class="tip">
+      <text class="tip__text">👆 拖拽移动 · 双指缩放 · 点击查看详情</text>
+    </view>
   </view>
 </template>
 
 <style lang="scss" scoped>
 .web-chart {
-  position: relative; width: 100%; height: 500rpx;
+  position: relative;
+  width: 100%;
 }
 
 .chart-container {
-  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  width: 100%;
+  height: 500rpx;
+  border-radius: $radius-base;
+  overflow: hidden;
 }
 
-.chart-placeholder {
-  position: relative; width: 500rpx; height: 500rpx;
-}
-
-.node-center {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: 100rpx; height: 100rpx; border-radius: 50%;
-  background: $color-primary; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; color: #fff;
-  box-shadow: 0 4rpx 16rpx rgba(242, 140, 56, 0.4);
-  &__icon { font-size: 32rpx; }
-  &__name { font-size: $font-size-xs; margin-top: 4rpx; }
-}
-
-.node-orbit {
-  position: absolute; left: 50%; top: 50%; width: 400rpx; height: 400rpx;
-  transform: translate(-50%, -50%);
-}
-
-.node-item {
-  position: absolute; width: 80rpx; height: 80rpx;
-  border-radius: 50%; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; cursor: pointer;
-  background: $color-bg-card; box-shadow: $shadow-sm;
-  transition: transform 0.2s;
-
-  &:active { transform: scale(0.95); }
-
-  &--paternal { background: rgba(74, 69, 64, 0.1); border: 2rpx solid #4A4540; }
-  &--maternal { background: rgba(74, 69, 64, 0.1); border: 2rpx solid #4A4540; }
-  &--spouse { background: rgba(242, 140, 56, 0.1); border: 2rpx solid $color-primary; }
-  &--unverified { opacity: 0.6; border-style: dashed !important; }
-
-  &__icon { font-size: 24rpx; font-weight: 600; color: $color-text; }
-  &__name { font-size: $font-size-xs; color: $color-text; margin-top: 4rpx; max-width: 72rpx; overflow: hidden; text-overflow: ellipsis; }
-  &__relation { font-size: 18rpx; color: $color-text-secondary; max-width: 72rpx; overflow: hidden; }
+.chart-canvas {
+  width: 100%;
+  height: 100%;
 }
 
 .legend {
-  display: flex; justify-content: center; gap: $spacing-md;
-  padding: $spacing-sm; background: rgba(255,255,255,0.8);
-  border-radius: $radius-base; margin-top: $spacing-sm;
+  display: flex;
+  justify-content: center;
+  gap: $spacing-md;
+  padding: $spacing-sm;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: $radius-base;
+  margin-top: $spacing-sm;
 }
-.legend-item { display: flex; align-items: center; gap: 8rpx; font-size: $font-size-xs; color: $color-text-secondary; }
-.legend-line { width: 24rpx; height: 4rpx; border-radius: 2rpx;
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.legend-line {
+  width: 24rpx;
+  height: 4rpx;
+  border-radius: 2rpx;
   &--blood { background: #4A4540; }
   &--marriage { background: $color-primary; }
 }
-.legend-dot { width: 16rpx; height: 16rpx; border-radius: 50%;
+
+.legend-dot {
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
   &--verified { background: $color-success; }
-  &--unverified { background: $color-primary; opacity: 0.6; }
+  &--unverified { background: $color-primary; opacity: 0.5; border: 2rpx dashed $color-primary; }
+}
+
+.tip {
+  text-align: center;
+  padding: $spacing-xs;
+  &__text { font-size: $font-size-xs; color: $color-text-placeholder; }
 }
 </style>
