@@ -1,0 +1,43 @@
+// 年轻化配色方案 - 浅米白+暖橘+浅灰
+$color-bg: #FAF8F5;           // 浅米白 - 主背景
+$color-bg-card: #FFFFFF;      // 卡片白
+$color-primary: #F28C38;      // 暖橘 - 主色调
+$color-primary-light: #FFF3E8; // 暖橘浅色
+$color-secondary: #7C6F5B;    // 暖棕 - 辅助色
+$color-text: #2D2A26;         // 深棕 - 主文字
+$color-text-secondary: #8C8580; // 浅棕 - 副文字
+$color-text-placeholder: #C5C0BA; // 占位文字
+$color-border: #EDE8E2;       // 边框色
+$color-divider: #F2EDE7;      // 分割线
+$color-danger: #E85D3A;       // 警告红橘
+$color-success: #5DB075;      // 验证通过绿
+$color-blood: #4A4540;        // 血缘关系线色
+$color-marriage: #F28C38;     // 婚姻关系线色
+
+// 字体
+$font-size-xs: 20rpx;
+$font-size-sm: 24rpx;
+$font-size-base: 28rpx;
+$font-size-md: 32rpx;
+$font-size-lg: 36rpx;
+$font-size-xl: 44rpx;
+
+// 间距
+$spacing-xs: 8rpx;
+$spacing-sm: 16rpx;
+$spacing-base: 24rpx;
+$spacing-md: 32rpx;
+$spacing-lg: 48rpx;
+$spacing-xl: 64rpx;
+
+// 圆角
+$radius-sm: 12rpx;
+$radius-base: 16rpx;
+$radius-lg: 24rpx;
+$radius-xl: 32rpx;
+$radius-round: 50%;
+
+// 阴影
+$shadow-sm: 0 2rpx 8rpx rgba(45, 42, 38, 0.06);
+$shadow-base: 0 4rpx 16rpx rgba(45, 42, 38, 0.08);
+$shadow-lg: 0 8rpx 32rpx rgba(45, 42, 38, 0.12);

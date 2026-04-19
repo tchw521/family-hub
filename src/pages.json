@@ -1,0 +1,39 @@
+{
+  "pages": [
+    { "path": "pages/index/index", "style": { "navigationBarTitleText": "家族互联", "navigationStyle": "custom" } },
+    { "path": "pages/family-tree/index", "style": { "navigationBarTitleText": "家族树" } },
+    { "path": "pages/relatives/index", "style": { "navigationBarTitleText": "亲属管理" } },
+    { "path": "pages/circle/index", "style": { "navigationBarTitleText": "家族圈" } },
+    { "path": "pages/network/index", "style": { "navigationBarTitleText": "家族人脉" } },
+    { "path": "pages/mine/index", "style": { "navigationBarTitleText": "我的" } },
+    { "path": "pages/auth/login", "style": { "navigationBarTitleText": "登录", "navigationStyle": "custom" } },
+    { "path": "pages/auth/register", "style": { "navigationBarTitleText": "注册" } },
+    { "path": "pages/relatives/add", "style": { "navigationBarTitleText": "添加亲属" } },
+    { "path": "pages/relatives/verify", "style": { "navigationBarTitleText": "验证管理" } },
+    { "path": "pages/relatives/search", "style": { "navigationBarTitleText": "找亲属" } },
+    { "path": "pages/relatives/detail", "style": { "navigationBarTitleText": "亲属详情" } },
+    { "path": "pages/relatives/edit", "style": { "navigationBarTitleText": "编辑亲属" } },
+    { "path": "pages/mine/profile", "style": { "navigationBarTitleText": "个人档案" } },
+    { "path": "pages/mine/privacy", "style": { "navigationBarTitleText": "隐私设置" } },
+    { "path": "pages/mine/invite", "style": { "navigationBarTitleText": "邀请家人" } }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "家族互联",
+    "navigationBarBackgroundColor": "#FAF8F5",
+    "backgroundColor": "#FAF8F5"
+  },
+  "tabBar": {
+    "color": "#8C8580",
+    "selectedColor": "#F28C38",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/index/index", "text": "蛛网", "iconPath": "static/icons/web.png", "selectedIconPath": "static/icons/web-active.png" },
+      { "pagePath": "pages/family-tree/index", "text": "家族树", "iconPath": "static/icons/tree.png", "selectedIconPath": "static/icons/tree-active.png" },
+      { "pagePath": "pages/circle/index", "text": "家族圈", "iconPath": "static/icons/circle.png", "selectedIconPath": "static/icons/circle-active.png" },
+      { "pagePath": "pages/network/index", "text": "人脉", "iconPath": "static/icons/network.png", "selectedIconPath": "static/icons/network-active.png" },
+      { "pagePath": "pages/mine/index", "text": "我的", "iconPath": "static/icons/mine.png", "selectedIconPath": "static/icons/mine-active.png" }
+    ]
+  }
+}
