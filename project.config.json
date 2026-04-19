@@ -39,6 +39,7 @@
   "libVersion": "3.5.5",
   "srcMiniprogramRoot": "dist/build/mp-weixin/",
   "appid": "wxb681aca527f65920",
+  "cloudfunctionRoot": "cloudfunctions/",
   "projectname": "family-hub",
   "condition": {},
   "editorSetting": {
