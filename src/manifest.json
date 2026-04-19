@@ -1,27 +1,54 @@
 {
-  "miniprogramRoot": "dist/dev/mp-weixin/",
-  "projectname": "family-hub",
-  "description": "家族互联 - 年轻化版·手动添加+验证模式",
+  "name": "family-hub",
   "appid": "wxb681aca527f65920",
-  "setting": {
-    "urlCheck": false,
-    "es6": true,
-    "enhance": true,
-    "postcss": true,
-    "preloadBackgroundData": false,
-    "minified": true,
-    "newFeature": true,
-    "coverView": true,
-    "nodeModules": false,
-    "autoAudits": false,
-    "showShadowRootInWxmlPanel": true,
-    "scopeDataCheck": false,
-    "uglifyFileName": false,
-    "checkInvalidKey": true,
-    "checkSiteMap": true,
-    "uploadWithSourceMap": true,
-    "compileHotReLoad": false,
-    "babelSetting": { "ignore": [], "disablePlugins": [], "outputPath": "" }
+  "description": "家族互联 - 年轻化版·手动添加+验证模式",
+  "versionName": "0.1.0",
+  "versionCode": "1",
+  "transformPx": false,
+  "mp-weixin": {
+    "appid": "wxb681aca527f65920",
+    "setting": {
+      "urlCheck": false,
+      "es6": true,
+      "enhance": true,
+      "postcss": true,
+      "preloadBackgroundData": false,
+      "minified": true,
+      "newFeature": true,
+      "coverView": true,
+      "nodeModules": false,
+      "autoAudits": false,
+      "showShadowRootInWxmlPanel": true,
+      "scopeDataCheck": false,
+      "uglifyFileName": false,
+      "checkInvalidKey": true,
+      "checkSiteMap": true,
+      "uploadWithSourceMap": true,
+      "compileHotReLoad": false,
+      "babelSetting": {
+        "ignore": [],
+        "disablePlugins": [],
+        "outputPath": ""
+      }
+    },
+    "usingComponents": true,
+    "permission": {
+      "scope.userLocation": {
+        "desc": "你的位置信息将用于家族成员定位"
+      }
+    },
+    "requiredPrivateInfos": ["getLocation"],
+    "cloudfunctionTemplateRoot": "cloudfunctions",
+    "lazyCodeLoading": "requiredComponents"
   },
-  "compileType": "miniprogram"
+  "uniCloud": {
+    "spaceId": "",
+    "spaceAppId": "wxb681aca527f65920",
+    "spaceSecretId": "",
+    "spaceSecretKey": "",
+    "spaceEnv": "familyhub-d8gzq4k0ub244086e",
+    "debugOptions": {
+      "enable": false
+    }
+  }
 }

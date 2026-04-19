@@ -1,0 +1,8 @@
+{
+  "envId": "familyhub-d8gzq4k0ub244086e",
+  "instanceTypes": ["s0"],
+  "isQuickApp": false,
+  "functionRoot": "./cloudfunctions",
+  "containerRoots": [],
+  "regions": ["ap-shanghai"]
+}
