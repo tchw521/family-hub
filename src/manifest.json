@@ -2,7 +2,7 @@
   "miniprogramRoot": "dist/dev/mp-weixin/",
   "projectname": "family-hub",
   "description": "家族互联 - 年轻化版·手动添加+验证模式",
-  "appid": "",
+  "appid": "wxb681aca527f65920",
   "setting": {
     "urlCheck": false,
     "es6": true,
