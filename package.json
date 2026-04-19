@@ -19,8 +19,7 @@
     "@dcloudio/uni-mp-weixin": "3.0.0-4060620250520001",
     "vue": "^3.4.38",
     "pinia": "^2.1.7",
-    "echarts": "^5.5.0",
-    "limason-echarts-uniapp": "^1.0.3"
+    "echarts": "^5.5.0"
   },
   "devDependencies": {
     "@dcloudio/types": "^3.4.8",
