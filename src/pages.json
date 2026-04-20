@@ -30,7 +30,7 @@
     "backgroundColor": "#FFFFFF",
     "borderStyle": "white",
     "list": [
-      { "pagePath": "pages/index/index", "text": "蛛网", "iconPath": "static/icons/web.png", "selectedIconPath": "static/icons/web-active.png" },
+      { "pagePath": "pages/index/index", "text": "星网", "iconPath": "static/icons/web.png", "selectedIconPath": "static/icons/web-active.png" },
       { "pagePath": "pages/family-tree/index", "text": "家族树", "iconPath": "static/icons/tree.png", "selectedIconPath": "static/icons/tree-active.png" },
       { "pagePath": "pages/circle/index", "text": "家族圈", "iconPath": "static/icons/circle.png", "selectedIconPath": "static/icons/circle-active.png" },
       { "pagePath": "pages/network/index", "text": "人脉", "iconPath": "static/icons/network.png", "selectedIconPath": "static/icons/network-active.png" },

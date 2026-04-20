@@ -1,70 +1,74 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
+import { onShow, onShareAppMessage } from '@dcloudio/uni-app'
 import { useUserStore } from '@/store/user'
 import { useFamilyStore } from '@/store/family'
-import { WebChart } from '@/components'
-import { generateShareCard, saveShareCard, generateInviteShare } from '@/utils/share'
-import { requestCommonSubscribes } from '@/utils/notify'
+import type { GraphNode } from '@/store/family'
 
 const userStore = useUserStore()
 const familyStore = useFamilyStore()
 
-const showAddSheet = ref(false)
-const searchKeyword = ref('')
+// ─── 星网状态 ─────────────────────────────────────────────
+const centerId = ref('')
+const centerMember = computed(() =>
+  familyStore.members.find(m => m.id === centerId.value) || null
+)
 
-const addOptions = [
-  { icon: '👤', text: '手动添加', desc: '快速添加亲属信息', action: 'manual' },
-  { icon: '🔍', text: '找亲属', desc: '搜索并验证关联', action: 'search' },
-]
-
-// 检查登录状态
-onMounted(() => {
-  if (!userStore.isLoggedIn) {
-    uni.redirectTo({ url: '/pages/auth/login' })
-  }
-  // 加载亲属数据
-  familyStore.loadRelatives()
-  // 请求订阅消息授权
-  requestCommonSubscribes()
+// 当前中心的关系成员列表（侧边信息面板用）
+const centerRelations = computed(() => {
+  if (!centerId.value) return []
+  return familyStore.getMemberRelations(centerId.value).map(rel => {
+    const otherId = rel.fromId === centerId.value ? rel.toId : rel.fromId
+    const other = familyStore.members.find(m => m.id === otherId)
+    return { rel, other }
+  }).filter(x => x.other)
 })
 
-// ===== 分享功能 =====
-// 分享给微信好友
-onShareAppMessage(() => {
-  const inviteCode = uni.getStorageSync('inviteCode') || ''
-  const userName = userStore.user?.name || '家族互联用户'
-  return generateInviteShare(inviteCode, userName)
-})
+// 图数据
+const graphData = computed(() => familyStore.buildGraphData(centerId.value))
 
-// 分享到朋友圈
-onShareTimeline(() => ({
-  title: `${userStore.user?.name || '我'}的家族蛛网 - 家族互联`,
-  query: `inviteCode=${uni.getStorageSync('inviteCode') || ''}`,
-}))
+// ─── 面板状态 ─────────────────────────────────────────────
+const showInfoPanel = ref(false)   // 成员信息面板
+const selectedNode = ref<GraphNode | null>(null)
+const showAddSheet = ref(false)    // 添加成员弹窗
 
-// 保存蛛网分享卡片到相册
-async function onSaveShareCard() {
-  const stats = familyStore.stats
-  const imagePath = await generateShareCard({
-    userName: userStore.user?.name || '我',
-    relativeCount: stats.total,
-    verifiedCount: stats.verified,
-    familyCount: stats.familyCount,
-  })
-  if (imagePath) {
-    await saveShareCard(imagePath)
-  } else {
-    uni.showToast({ title: '生成分享卡片失败', icon: 'none' })
-  }
-}
-
+// ─── 统计 ─────────────────────────────────────────────────
 const stats = computed(() => familyStore.stats)
 const pendingCount = computed(() => familyStore.pendingVerifyCount)
 
-function onAdd() {
-  showAddSheet.value = true
+// ─── 初始化 ───────────────────────────────────────────────
+onMounted(async () => {
+  await familyStore.loadRelatives()
+  centerId.value = familyStore.myMemberId
+})
+
+onShow(() => {
+  if (familyStore.members.length > 0 && !centerId.value) {
+    centerId.value = familyStore.myMemberId
+  }
+})
+
+// ─── 星网交互 ─────────────────────────────────────────────
+function onNodeClick(node: GraphNode) {
+  selectedNode.value = node
+  showInfoPanel.value = true
 }
+
+function onCenterChange(nodeId: string) {
+  centerId.value = nodeId
+  showInfoPanel.value = false
+}
+
+function resetCenter() {
+  centerId.value = familyStore.myMemberId
+  showInfoPanel.value = false
+}
+
+// ─── 添加成员 ─────────────────────────────────────────────
+const addOptions = [
+  { icon: '✏️', text: '手动添加', desc: '填写亲属信息', action: 'manual' },
+  { icon: '🔍', text: '搜索关联', desc: '找到已注册的亲属', action: 'search' },
+]
 
 function onSelectAdd(action: string) {
   showAddSheet.value = false
@@ -75,212 +79,552 @@ function onSelectAdd(action: string) {
   }
 }
 
-function onViewNotifications() {
-  uni.navigateTo({ url: '/pages/relatives/verify' })
-}
+// ─── 分享 ─────────────────────────────────────────────────
+onShareAppMessage(() => ({
+  title: `${userStore.user?.nickname || '我'}的家族星网`,
+  path: '/pages/index/index',
+}))
 </script>
 
 <template>
   <view class="home">
-    <!-- 顶部自定义导航栏 -->
-    <view class="nav-bar">
-      <view class="nav-bar__title">家族互联</view>
-      <view class="nav-bar__actions">
-        <view class="nav-bar__btn" @tap="onSaveShareCard">
-          <text class="nav-bar__icon">📤</text>
-        </view>
-        <view class="nav-bar__btn" @tap="onViewNotifications">
-          <text class="nav-bar__icon">🔔</text>
-          <view v-if="pendingCount > 0" class="nav-bar__badge animate-badge">{{ pendingCount }}</view>
+
+    <!-- ── 顶部导航栏 ── -->
+    <view class="nav">
+      <view class="nav__left">
+        <text class="nav__title">家族星网</text>
+        <view v-if="centerId !== familyStore.myMemberId" class="nav__center-tag" @tap="resetCenter">
+          <text class="nav__center-name">{{ centerMember?.name }}</text>
+          <text class="nav__center-reset">回到我 ×</text>
         </view>
       </view>
-    </view>
-
-    <!-- 搜索栏 -->
-    <view class="search-section">
-      <view class="search-bar">
-        <text class="search-bar__icon">🔍</text>
-        <input class="search-bar__input" v-model="searchKeyword"
-          placeholder="搜索亲属姓名" confirm-type="search"
-          @confirm="uni.navigateTo({ url: '/pages/relatives/search' })" />
-        <text class="search-bar__link" @tap="uni.navigateTo({ url: '/pages/relatives/search' })">找亲属</text>
+      <view class="nav__right">
+        <view class="nav__btn" @tap="uni.navigateTo({ url: '/pages/relatives/verify' })">
+          <text class="nav__icon">🔔</text>
+          <view v-if="pendingCount > 0" class="nav__badge">{{ pendingCount }}</view>
+        </view>
+        <view class="nav__btn" @tap="showAddSheet = true">
+          <text class="nav__icon">＋</text>
+        </view>
       </view>
     </view>
 
-    <!-- 蛛网可视化区域 -->
-    <view class="web-section card">
-      <view class="web-section__header">
-        <text class="web-section__title">我的家族蛛网</text>
-        <text class="web-section__subtitle">共 {{ stats.total }} 位亲属</text>
+    <!-- ── 星网主体（全屏） ── -->
+    <view class="net-wrap">
+      <StarNet
+        v-if="graphData.nodes.length > 0"
+        :nodes="graphData.nodes"
+        :edges="graphData.edges"
+        :centerId="centerId"
+        @nodeClick="onNodeClick"
+        @centerChange="onCenterChange"
+      />
+
+      <!-- 空状态 -->
+      <view v-else class="net-empty">
+        <text class="net-empty__icon">🌟</text>
+        <text class="net-empty__title">星网还是空的</text>
+        <text class="net-empty__hint">添加第一位家人，开始织网</text>
+        <view class="net-empty__btn" @tap="showAddSheet = true">
+          <text>＋ 添加家人</text>
+        </view>
       </view>
-      <WebChart v-if="stats.total > 0" />
-      <view v-else class="web-placeholder">
-        <text class="web-placeholder__icon">🕸️</text>
-        <text class="web-placeholder__text">还没有亲属</text>
-        <text class="web-placeholder__hint">点击下方按钮添加第一位亲属吧</text>
+
+      <!-- 底部统计条 -->
+      <view class="net-stats">
+        <view class="net-stat" @tap="uni.switchTab({ url: '/pages/relatives/index' })">
+          <text class="net-stat__num">{{ stats.total }}</text>
+          <text class="net-stat__label">成员</text>
+        </view>
+        <view class="net-stat-divider"></view>
+        <view class="net-stat" @tap="uni.navigateTo({ url: '/pages/relatives/verify' })">
+          <text class="net-stat__num">{{ stats.verified }}</text>
+          <text class="net-stat__label">已验证</text>
+        </view>
+        <view class="net-stat-divider"></view>
+        <view class="net-stat">
+          <text class="net-stat__num">{{ stats.relationCount }}</text>
+          <text class="net-stat__label">关系线</text>
+        </view>
+        <view class="net-stat-divider"></view>
+        <view class="net-stat">
+          <text class="net-stat__num">{{ stats.familyCount }}</text>
+          <text class="net-stat__label">家族</text>
+        </view>
+      </view>
+
+      <!-- 操作提示 -->
+      <view class="net-hint">
+        <text>点击成员查看详情 · 再次点击切换中心</text>
       </view>
     </view>
 
-    <!-- 快捷统计 -->
-    <view class="stats-row">
-      <view class="stat-item card" @tap="uni.switchTab({ url: '/pages/family-tree/index' })">
-        <text class="stat-item__num">{{ stats.verified }}</text>
-        <text class="stat-item__label">已验证</text>
-      </view>
-      <view class="stat-item card" @tap="uni.navigateTo({ url: '/pages/relatives/verify' })">
-        <text class="stat-item__num">{{ stats.unverified }}</text>
-        <text class="stat-item__label">待验证</text>
-      </view>
-      <view class="stat-item card" @tap="uni.switchTab({ url: '/pages/network/index' })">
-        <text class="stat-item__num">{{ stats.familyCount }}</text>
-        <text class="stat-item__label">家族数</text>
-      </view>
-    </view>
-
-    <!-- 最近亲属 -->
-    <view class="section">
-      <view class="section__header">
-        <text class="section__title">最近添加</text>
-        <text class="section__more" @tap="uni.switchTab({ url: '/pages/relatives/index' })">查看全部 ›</text>
-      </view>
-      <view v-if="familyStore.recentRelatives.length === 0" class="empty-state">
-        <text class="empty-state__icon">🌱</text>
-        <text class="empty-state__text">还没有亲属，快去添加吧</text>
-      </view>
-      <view v-else class="relative-list">
-        <view v-for="(r, idx) in familyStore.recentRelatives" :key="r.id"
-            :class="['relative-item', 'animate-appear', `stagger-${idx + 1}`]">
-          <view class="avatar">{{ r.name[0] }}</view>
-          <view class="relative-item__info">
-            <text class="relative-item__name">{{ r.name }}</text>
-            <text class="relative-item__relation">{{ r.relationLabel }}</text>
+    <!-- ── 成员信息面板（底部抽屉） ── -->
+    <view v-if="showInfoPanel && selectedNode" class="panel-mask" @tap="showInfoPanel = false">
+      <view class="panel" @tap.stop>
+        <!-- 面板头部 -->
+        <view class="panel__header">
+          <view class="panel__avatar" :class="selectedNode.verified ? 'panel__avatar--verified' : ''">
+            <text class="panel__avatar-text">{{ selectedNode.name.slice(0, 1) }}</text>
           </view>
-          <view :class="['tag', r.verified ? 'tag-verified' : 'tag-unverified']">
-            {{ r.verified ? '已验证' : '未验证' }}
+          <view class="panel__info">
+            <text class="panel__name">{{ selectedNode.name }}</text>
+            <view class="panel__tags">
+              <view v-if="selectedNode.isMe" class="tag tag--me">我</view>
+              <view v-if="selectedNode.verified" class="tag tag--verified">已验证</view>
+              <view v-else class="tag tag--unverified">未验证</view>
+            </view>
+          </view>
+          <view class="panel__close" @tap="showInfoPanel = false">✕</view>
+        </view>
+
+        <!-- 关系列表 -->
+        <view class="panel__relations">
+          <text class="panel__section-title">关系网络</text>
+          <view v-if="centerRelations.length === 0" class="panel__empty">
+            <text>暂无关系记录</text>
+          </view>
+          <view
+            v-for="item in centerRelations"
+            :key="item.rel.id"
+            class="panel__rel-item"
+            @tap="onCenterChange(item.other!.id)"
+          >
+            <view class="panel__rel-dot" :style="{ background: item.rel.verified ? '#4A90D9' : '#C5C0BA' }"></view>
+            <text class="panel__rel-label">{{ item.rel.label }}</text>
+            <text class="panel__rel-name">{{ item.other?.name }}</text>
+            <text class="panel__rel-arrow">›</text>
+          </view>
+        </view>
+
+        <!-- 操作按钮 -->
+        <view class="panel__actions">
+          <view
+            class="panel__action-btn panel__action-btn--primary"
+            @tap="onCenterChange(selectedNode.id)"
+          >
+            <text>以TA为中心</text>
+          </view>
+          <view
+            class="panel__action-btn"
+            @tap="uni.navigateTo({ url: `/pages/relatives/detail?id=${selectedNode.id}` }); showInfoPanel = false"
+          >
+            <text>查看详情</text>
           </view>
         </view>
       </view>
     </view>
 
-    <!-- 添加亲属按钮（浮动） -->
-    <view class="fab" @tap="onAdd">
-      <text class="fab__icon">＋</text>
-    </view>
-
-    <!-- 添加方式弹窗 -->
+    <!-- ── 添加成员弹窗 ── -->
     <view v-if="showAddSheet" class="sheet-mask" @tap="showAddSheet = false">
       <view class="sheet" @tap.stop>
         <view class="sheet__header">
-          <text class="sheet__title">添加亲属</text>
+          <text class="sheet__title">添加家人</text>
           <text class="sheet__close" @tap="showAddSheet = false">✕</text>
         </view>
-        <view v-for="opt in addOptions" :key="opt.action" class="sheet__option" @tap="onSelectAdd(opt.action)">
+        <view
+          v-for="opt in addOptions"
+          :key="opt.action"
+          class="sheet__option"
+          @tap="onSelectAdd(opt.action)"
+        >
           <text class="sheet__option-icon">{{ opt.icon }}</text>
           <view class="sheet__option-text">
             <text class="sheet__option-title">{{ opt.text }}</text>
             <text class="sheet__option-desc">{{ opt.desc }}</text>
           </view>
+          <text class="sheet__option-arrow">›</text>
         </view>
       </view>
     </view>
+
   </view>
 </template>
 
 <style lang="scss" scoped>
-.home { min-height: 100vh; padding-bottom: 180rpx; }
+// ── 整体布局 ──────────────────────────────────────────────
+.home {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #FAF8F5;
+}
 
-.nav-bar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 60rpx 32rpx 24rpx;
-  background: $color-bg;
+// ── 导航栏 ────────────────────────────────────────────────
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 60rpx 32rpx 20rpx;
+  background: #FAF8F5;
+  position: relative;
+  z-index: 10;
 
-  &__title { font-size: $font-size-lg; font-weight: 700; color: $color-text; }
-  &__actions { display: flex; gap: 24rpx; }
-  &__btn { position: relative; padding: 8rpx; }
-  &__icon { font-size: 40rpx; }
+  &__left {
+    display: flex;
+    align-items: center;
+    gap: 16rpx;
+  }
+
+  &__title {
+    font-size: 40rpx;
+    font-weight: 700;
+    color: $color-text;
+  }
+
+  &__center-tag {
+    display: flex;
+    align-items: center;
+    gap: 8rpx;
+    background: rgba(242, 140, 56, 0.12);
+    border-radius: $radius-lg;
+    padding: 6rpx 16rpx;
+  }
+
+  &__center-name {
+    font-size: $font-size-sm;
+    color: $color-primary;
+    font-weight: 500;
+  }
+
+  &__center-reset {
+    font-size: $font-size-xs;
+    color: $color-text-secondary;
+  }
+
+  &__right {
+    display: flex;
+    align-items: center;
+    gap: 8rpx;
+  }
+
+  &__btn {
+    position: relative;
+    width: 72rpx;
+    height: 72rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: $color-bg-card;
+    border-radius: $radius-round;
+    box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.06);
+
+    &:active { opacity: 0.7; }
+  }
+
+  &__icon {
+    font-size: 36rpx;
+  }
+
   &__badge {
-    position: absolute; top: -4rpx; right: -8rpx;
-    background: $color-danger; color: #fff; font-size: 18rpx;
-    min-width: 28rpx; height: 28rpx; border-radius: 14rpx;
-    display: flex; align-items: center; justify-content: center;
+    position: absolute;
+    top: 4rpx;
+    right: 4rpx;
+    background: $color-danger;
+    color: #fff;
+    font-size: 18rpx;
+    min-width: 28rpx;
+    height: 28rpx;
+    border-radius: 14rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 0 6rpx;
   }
 }
 
-.search-section { padding: 0 $spacing-base $spacing-sm; }
-.search-bar {
-  display: flex; align-items: center; gap: $spacing-sm;
-  padding: $spacing-sm $spacing-base; background: $color-bg-card;
+// ── 星网区域 ──────────────────────────────────────────────
+.net-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin: 0 $spacing-base;
   border-radius: $radius-lg;
-  &__icon { font-size: 32rpx; color: $color-text-placeholder; }
-  &__input { flex: 1; font-size: $font-size-base; }
-  &__link { font-size: $font-size-sm; color: $color-primary; white-space: nowrap; }
+  overflow: hidden;
+  background: #FAF8F5;
+  box-shadow: 0 4rpx 24rpx rgba(0,0,0,0.06);
+  min-height: 600rpx;
 }
 
-.web-section {
-  margin: 0 $spacing-base $spacing-base;
-  &__header { display: flex; justify-content: space-between; align-items: center; margin-bottom: $spacing-sm; }
-  &__title { font-size: $font-size-md; font-weight: 600; }
-  &__subtitle { font-size: $font-size-sm; color: $color-text-secondary; }
+// StarNet 组件撑满
+:deep(.starnet) {
+  flex: 1;
+  min-height: 520rpx;
 }
 
-.web-placeholder {
-  display: flex; flex-direction: column; align-items: center;
-  padding: 60rpx 0;
-  &__icon { font-size: 80rpx; margin-bottom: $spacing-sm; }
-  &__text { font-size: $font-size-base; color: $color-text-secondary; margin-bottom: $spacing-xs; }
-  &__hint { font-size: $font-size-sm; color: $color-text-placeholder; }
+// 空状态
+.net-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80rpx 0;
+
+  &__icon { font-size: 100rpx; margin-bottom: $spacing-base; }
+  &__title { font-size: $font-size-lg; font-weight: 600; color: $color-text; }
+  &__hint { font-size: $font-size-sm; color: $color-text-secondary; margin-top: $spacing-xs; }
+
+  &__btn {
+    margin-top: $spacing-xl;
+    background: $color-primary;
+    color: #fff;
+    padding: $spacing-sm $spacing-xl;
+    border-radius: $radius-round;
+    font-size: $font-size-base;
+    font-weight: 500;
+    box-shadow: 0 8rpx 24rpx rgba(242,140,56,0.3);
+    &:active { opacity: 0.85; }
+  }
 }
 
-.stats-row { display: flex; gap: $spacing-sm; padding: 0 $spacing-base; margin-bottom: $spacing-base; }
-.stat-item {
-  flex: 1; text-align: center; padding: $spacing-base $spacing-sm;
-  &__num { display: block; font-size: $font-size-xl; font-weight: 700; color: $color-primary; }
-  &__label { font-size: $font-size-xs; color: $color-text-secondary; }
+// 底部统计条
+.net-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: $spacing-sm $spacing-base;
+  background: rgba(255,255,255,0.9);
+  border-top: 1rpx solid $color-divider;
 }
 
-.section {
-  padding: 0 $spacing-base;
-  &__header { display: flex; justify-content: space-between; align-items: center; margin-bottom: $spacing-sm; }
-  &__title { font-size: $font-size-md; font-weight: 600; }
-  &__more { font-size: $font-size-sm; color: $color-primary; }
+.net-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8rpx 0;
+  &:active { opacity: 0.7; }
+
+  &__num {
+    font-size: $font-size-lg;
+    font-weight: 700;
+    color: $color-primary;
+    line-height: 1.2;
+  }
+
+  &__label {
+    font-size: $font-size-xs;
+    color: $color-text-secondary;
+    margin-top: 4rpx;
+  }
 }
 
-.relative-item {
-  display: flex; align-items: center; padding: $spacing-base;
-  background: $color-bg-card; border-radius: $radius-base; margin-bottom: $spacing-sm;
-  &__info { flex: 1; margin-left: $spacing-base; }
-  &__name { display: block; font-size: $font-size-base; font-weight: 500; }
-  &__relation { font-size: $font-size-sm; color: $color-text-secondary; }
+.net-stat-divider {
+  width: 1rpx;
+  height: 40rpx;
+  background: $color-divider;
 }
 
-.fab {
-  position: fixed; right: 40rpx; bottom: 200rpx;
-  width: 100rpx; height: 100rpx; border-radius: $radius-round;
-  background: $color-primary; display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 8rpx 24rpx rgba(242, 140, 56, 0.4);
-  &__icon { font-size: 48rpx; color: #fff; font-weight: 300; }
+// 操作提示
+.net-hint {
+  text-align: center;
+  padding: 8rpx;
+  background: rgba(255,255,255,0.7);
+
+  text {
+    font-size: $font-size-xs;
+    color: $color-text-placeholder;
+  }
 }
 
+// ── 成员信息面板 ──────────────────────────────────────────
+.panel-mask {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.35);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+}
+
+.panel {
+  width: 100%;
+  background: #fff;
+  border-radius: $radius-xl $radius-xl 0 0;
+  padding: $spacing-lg $spacing-base calc(env(safe-area-inset-bottom) + 40rpx);
+  max-height: 75vh;
+  overflow-y: auto;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    margin-bottom: $spacing-lg;
+  }
+
+  &__avatar {
+    width: 96rpx;
+    height: 96rpx;
+    border-radius: 50%;
+    background: $color-text-placeholder;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+
+    &--verified { background: #4A90D9; }
+  }
+
+  &__avatar-text {
+    font-size: 36rpx;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  &__info {
+    flex: 1;
+    margin-left: $spacing-base;
+  }
+
+  &__name {
+    display: block;
+    font-size: $font-size-lg;
+    font-weight: 700;
+    color: $color-text;
+  }
+
+  &__tags {
+    display: flex;
+    gap: 8rpx;
+    margin-top: 8rpx;
+  }
+
+  &__close {
+    font-size: $font-size-lg;
+    color: $color-text-secondary;
+    padding: 8rpx;
+  }
+
+  &__section-title {
+    display: block;
+    font-size: $font-size-sm;
+    color: $color-text-secondary;
+    margin-bottom: $spacing-sm;
+    font-weight: 500;
+  }
+
+  &__relations {
+    margin-bottom: $spacing-lg;
+  }
+
+  &__empty {
+    text-align: center;
+    padding: $spacing-base 0;
+    color: $color-text-placeholder;
+    font-size: $font-size-sm;
+  }
+
+  &__rel-item {
+    display: flex;
+    align-items: center;
+    padding: $spacing-sm 0;
+    border-bottom: 1rpx solid $color-divider;
+    &:last-child { border-bottom: none; }
+    &:active { opacity: 0.7; }
+  }
+
+  &__rel-dot {
+    width: 16rpx;
+    height: 16rpx;
+    border-radius: 50%;
+    margin-right: $spacing-sm;
+    flex-shrink: 0;
+  }
+
+  &__rel-label {
+    font-size: $font-size-sm;
+    color: $color-text-secondary;
+    width: 100rpx;
+  }
+
+  &__rel-name {
+    flex: 1;
+    font-size: $font-size-base;
+    color: $color-text;
+    font-weight: 500;
+  }
+
+  &__rel-arrow {
+    color: $color-text-placeholder;
+  }
+
+  &__actions {
+    display: flex;
+    gap: $spacing-sm;
+  }
+
+  &__action-btn {
+    flex: 1;
+    height: 80rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: $radius-base;
+    font-size: $font-size-base;
+    background: $color-bg;
+    color: $color-text;
+    border: 1rpx solid $color-border;
+    &:active { opacity: 0.7; }
+
+    &--primary {
+      background: $color-primary;
+      color: #fff;
+      border-color: $color-primary;
+      box-shadow: 0 4rpx 16rpx rgba(242,140,56,0.3);
+    }
+  }
+}
+
+// ── 添加弹窗 ──────────────────────────────────────────────
 .sheet-mask {
-  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.4); z-index: 999;
-  display: flex; align-items: flex-end;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
 }
+
 .sheet {
-  width: 100%; background: $color-bg-card; border-radius: $radius-xl $radius-xl 0 0;
+  width: 100%;
+  background: $color-bg-card;
+  border-radius: $radius-xl $radius-xl 0 0;
   padding: $spacing-base $spacing-base calc(env(safe-area-inset-bottom) + 32rpx);
-  &__header { display: flex; justify-content: space-between; align-items: center; margin-bottom: $spacing-base; }
+
+  &__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: $spacing-base;
+  }
+
   &__title { font-size: $font-size-md; font-weight: 600; }
   &__close { font-size: $font-size-md; color: $color-text-secondary; padding: 8rpx; }
+
   &__option {
-    display: flex; align-items: center; padding: $spacing-base;
-    border-radius: $radius-base; margin-bottom: $spacing-sm;
+    display: flex;
+    align-items: center;
+    padding: $spacing-base;
+    border-radius: $radius-base;
+    margin-bottom: $spacing-sm;
     background: $color-bg;
     &:active { background: $color-divider; }
   }
+
   &__option-icon { font-size: 48rpx; margin-right: $spacing-base; }
   &__option-title { display: block; font-size: $font-size-base; font-weight: 500; }
   &__option-desc { display: block; font-size: $font-size-sm; color: $color-text-secondary; }
+  &__option-arrow { color: $color-text-placeholder; margin-left: auto; }
+}
+
+// ── 标签 ──────────────────────────────────────────────────
+.tag {
+  font-size: $font-size-xs;
+  padding: 4rpx 12rpx;
+  border-radius: $radius-sm;
+
+  &--me { background: rgba(242,140,56,0.15); color: $color-primary; }
+  &--verified { background: rgba(74,144,217,0.12); color: #4A90D9; }
+  &--unverified { background: $color-bg; color: $color-text-secondary; border: 1rpx solid $color-border; }
 }
 </style>
