@@ -1,25 +1,15 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { ref } from 'vue'
 import { wxLogin } from '@/utils/auth'
 import { useUserStore } from '@/store/user'
 
 const userStore = useUserStore()
 const loading = ref(false)
-const redirectUrl = ref('')
-const hideCard = ref('')
-
-// 页面加载
-onLoad((options: any) => {
-  redirectUrl.value = options?.redirect || ''
-  hideCard.value = options?.hideCard || ''
-})
 
 // 微信一键登录
-async function handleWxLogin() {
-  if (loading.value) return
-  
+async function handleLogin() {
   loading.value = true
+  
   uni.showLoading({ title: '登录中...', mask: true })
   
   try {
@@ -28,6 +18,7 @@ async function handleWxLogin() {
     uni.hideLoading()
     
     if (result.success && result.user) {
+      // 更新 store
       userStore.setUser(result.user)
       
       uni.showToast({ 
@@ -36,8 +27,15 @@ async function handleWxLogin() {
         duration: 1500
       })
       
+      // 延迟跳转
       setTimeout(() => {
-        navigateBack()
+        // 返回上一页或跳转首页
+        const pages = getCurrentPages()
+        if (pages.length > 1) {
+          uni.navigateBack()
+        } else {
+          uni.switchTab({ url: '/pages/index/index' })
+        }
       }, 1500)
     } else {
       uni.showToast({
@@ -45,10 +43,10 @@ async function handleWxLogin() {
         icon: 'none'
       })
     }
-  } catch (error: any) {
+  } catch (error) {
     uni.hideLoading()
     uni.showToast({
-      title: '登录失败，请稍后重试',
+      title: '登录失败，稍后再试',
       icon: 'none'
     })
   } finally {
@@ -62,26 +60,9 @@ function handleGuest() {
     title: '游客模式功能受限',
     icon: 'none'
   })
-  setTimeout(navigateBack, 1000)
-}
-
-// 返回或跳转
-function navigateBack() {
-  if (redirectUrl.value) {
-    uni.redirectTo({ url: decodeURIComponent(redirectUrl.value) })
-  } else {
-    const pages = getCurrentPages()
-    if (pages.length > 1) {
-      uni.navigateBack()
-    } else {
-      uni.switchTab({ url: '/pages/index/index' })
-    }
-  }
-}
-
-// 从卡片跳转
-function handleCardLogin(cardType: string) {
-  handleWxLogin()
+  setTimeout(() => {
+    uni.switchTab({ url: '/pages/index/index' })
+  }, 1000)
 }
 </script>
 
@@ -99,48 +80,39 @@ function handleCardLogin(cardType: string) {
     
     <!-- Logo 和标题 -->
     <view class="login-header">
-      <view class="login-logo-wrap">
-        <text class="login-logo-text">🕸️</text>
-      </view>
+      <image 
+        class="login-logo" 
+        src="/static/images/logo.png" 
+        mode="aspectFit" 
+      />
       <text class="login-title">家族互联</text>
-      <text class="login-subtitle">织一张家族蛛网，连起每个家人</text>
+      <text class="login-subtitle">织一张家族蛛网 🕸️</text>
     </view>
     
-    <!-- 登录方式 -->
-    <view class="login-content">
+    <!-- 登录按钮 -->
+    <view class="login-actions">
       <button 
-        class="login-btn login-btn--wechat" 
+        class="login-btn login-btn--primary" 
         :disabled="loading"
-        @tap="handleWxLogin"
+        @tap="handleLogin"
       >
-        <text class="login-btn__icon">📱</text>
+        <image 
+          class="login-btn__icon" 
+          src="/static/images/wechat-icon.png" 
+          mode="aspectFit" 
+        />
         <text>微信一键登录</text>
       </button>
       
       <button 
-        class="login-btn login-btn--guest" 
+        class="login-btn login-btn--secondary" 
         @tap="handleGuest"
       >
         <text>先看看再说</text>
       </button>
-      
-      <view class="login-features">
-        <view class="login-feature">
-          <text class="login-feature__icon">👨‍👩‍👧‍👦</text>
-          <text class="login-feature__text">记录家族关系</text>
-        </view>
-        <view class="login-feature">
-          <text class="login-feature__icon">🗺️</text>
-          <text class="login-feature__text">发现全家人脉</text>
-        </view>
-        <view class="login-feature">
-          <text class="login-feature__icon">💬</text>
-          <text class="login-feature__text">家族圈互动</text>
-        </view>
-      </view>
     </view>
     
-    <!-- 底部提示 -->
+    <!-- 提示 -->
     <view class="login-footer">
       <text class="login-hint">
         登录即表示同意
@@ -173,7 +145,6 @@ function handleCardLogin(cardType: string) {
   &__image {
     width: 100%;
     height: 100%;
-    opacity: 0.3;
   }
   
   &__overlay {
@@ -184,8 +155,8 @@ function handleCardLogin(cardType: string) {
     bottom: 0;
     background: linear-gradient(
       180deg,
-      rgba(250, 248, 245, 0.95) 0%,
-      rgba(255, 255, 255, 0.98) 100%
+      rgba(255, 255, 255, 0.9) 0%,
+      rgba(255, 255, 255, 0.95) 100%
     );
   }
 }
@@ -197,26 +168,18 @@ function handleCardLogin(cardType: string) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 180rpx;
+  padding-top: 200rpx;
 }
 
-.login-logo-wrap {
+.login-logo {
   width: 160rpx;
   height: 160rpx;
-  border-radius: 40rpx;
-  background: linear-gradient(135deg, #F28C38 0%, #E67E22 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 16rpx 48rpx rgba(242, 140, 56, 0.3);
-}
-
-.login-logo-text {
-  font-size: 80rpx;
+  border-radius: 32rpx;
+  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.1);
 }
 
 .login-title {
-  font-size: 52rpx;
+  font-size: 48rpx;
   font-weight: 700;
   color: $color-text;
   margin-top: $spacing-lg;
@@ -226,16 +189,15 @@ function handleCardLogin(cardType: string) {
   font-size: $font-size-base;
   color: $color-text-secondary;
   margin-top: $spacing-sm;
-  text-align: center;
-  padding: 0 $spacing-xl;
 }
 
-// 内容区域
-.login-content {
+// 按钮区域
+.login-actions {
   position: relative;
   z-index: 1;
   margin-top: auto;
   padding: 0 $spacing-xl;
+  padding-bottom: 80rpx;
 }
 
 .login-btn {
@@ -249,18 +211,18 @@ function handleCardLogin(cardType: string) {
   margin-bottom: $spacing-base;
   
   &__icon {
-    font-size: 40rpx;
+    width: 48rpx;
+    height: 48rpx;
     margin-right: $spacing-sm;
   }
   
-  &--wechat {
+  &--primary {
     background: #07C160;
     color: #fff;
     box-shadow: 0 8rpx 24rpx rgba(7, 193, 96, 0.3);
     
     &:active {
       background: #06AD56;
-      transform: scale(0.98);
     }
     
     &[disabled] {
@@ -268,38 +230,14 @@ function handleCardLogin(cardType: string) {
     }
   }
   
-  &--guest {
-    background: $color-bg-card;
+  &--secondary {
+    background: $color-bg;
     color: $color-text-secondary;
     border: 1rpx solid $color-border;
     
     &:active {
-      background: $color-bg;
+      background: $color-bg-card;
     }
-  }
-}
-
-// 功能亮点
-.login-features {
-  display: flex;
-  justify-content: space-around;
-  margin-top: $spacing-xl;
-  padding: $spacing-base 0;
-}
-
-.login-feature {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  
-  &__icon {
-    font-size: 48rpx;
-    margin-bottom: $spacing-xs;
-  }
-  
-  &__text {
-    font-size: $font-size-sm;
-    color: $color-text-secondary;
   }
 }
 
@@ -307,7 +245,7 @@ function handleCardLogin(cardType: string) {
 .login-footer {
   position: relative;
   z-index: 1;
-  padding: $spacing-xl $spacing-xl $spacing-lg;
+  padding-bottom: $spacing-xl;
   text-align: center;
 }
 

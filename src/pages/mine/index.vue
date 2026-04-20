@@ -1,30 +1,44 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/store/user'
 import { useFamilyStore } from '@/store/family'
+import { isLoggedIn } from '@/utils/auth'
 
 const userStore = useUserStore()
 const familyStore = useFamilyStore()
 
-const menuItems = [
-  { icon: '📋', label: '个人档案', url: '/pages/mine/profile' },
-  { icon: '🔒', label: '隐私设置', url: '/pages/mine/privacy' },
-  { icon: '🛡️', label: '权限管理', url: '', tip: '开发中' },
-  { icon: '💌', label: '邀请家人', url: '/pages/mine/invite' },
-  { icon: '❓', label: '帮助中心', url: '', tip: '开发中' },
-  { icon: '⚙️', label: '设置', url: '', tip: '开发中' },
-]
+const menuItems = computed(() => {
+  const base = [
+    { icon: '📋', label: '个人档案', url: '/pages/mine/profile' },
+    { icon: '🔒', label: '隐私设置', url: '/pages/mine/privacy' },
+    { icon: '🛡️', label: '权限管理', url: '', tip: '开发中' },
+    { icon: '💌', label: '邀请家人', url: '/pages/mine/invite' },
+    { icon: '❓', label: '帮助中心', url: '', tip: '开发中' },
+    { icon: '⚙️', label: '设置', url: '', tip: '开发中' },
+  ]
+  return base
+})
 
 const stats = computed(() => familyStore.stats)
+
+const isUserLoggedIn = computed(() => isLoggedIn())
+
+// 刷新数据
+onShow(() => {
+  if (isUserLoggedIn.value) {
+    familyStore.loadRelatives()
+  }
+})
 
 function onLogout() {
   uni.showModal({
     title: '确认退出',
     content: '确定要退出登录吗？',
     confirmColor: '#E85D3A',
-    success: (res) => {
+    success: async (res) => {
       if (res.confirm) {
-        userStore.logout()
+        await userStore.logout()
         uni.reLaunch({ url: '/pages/auth/login' })
       }
     }
@@ -32,31 +46,61 @@ function onLogout() {
 }
 
 function onMenuTap(item: any) {
+  if (!isLoggedIn()) {
+    uni.navigateTo({ url: '/pages/auth/login' })
+    return
+  }
+  
   if (!item.url) {
     uni.showToast({ title: `${item.label}开发中`, icon: 'none' })
     return
   }
+  
   uni.navigateTo({ url: item.url })
+}
+
+function goToLogin() {
+  uni.navigateTo({ url: '/pages/auth/login' })
+}
+
+function goToProfile() {
+  if (!isLoggedIn()) {
+    uni.navigateTo({ url: '/pages/auth/login' })
+    return
+  }
+  uni.navigateTo({ url: '/pages/mine/profile' })
 }
 </script>
 
 <template>
   <view class="mine">
     <!-- 用户卡片 -->
-    <view class="user-card" @tap="uni.navigateTo({ url: '/pages/mine/profile' })">
+    <view class="user-card" @tap="goToProfile">
       <view class="user-card__bg"></view>
       <view class="user-card__content">
         <view class="avatar" style="width:120rpx;height:120rpx;font-size:48rpx;">
-          {{ userStore.user?.name?.[0] || '?' }}
+          <image 
+            v-if="userStore.user?.avatar" 
+            :src="userStore.user.avatar" 
+            class="avatar-image"
+            mode="aspectFill" 
+          />
+          <text v-else>{{ userStore.user?.nickname?.[0] || '?' }}</text>
         </view>
         <view class="user-card__info">
-          <text class="user-card__name">{{ userStore.user?.name || '未登录' }}</text>
-          <text class="user-card__id">{{ userStore.user?.phone ? `已绑定手机 ${userStore.user.phone}` : '点击登录' }}</text>
+          <text class="user-card__name">{{ userStore.user?.nickname || '未登录' }}</text>
+          <text class="user-card__id">
+            {{ isUserLoggedIn 
+              ? (userStore.user?.phone ? `已绑定手机 ${userStore.user.phone}` : '点击完善个人信息') 
+              : '点击登录' 
+            }}
+          </text>
         </view>
         <text class="user-card__arrow">›</text>
       </view>
-      <!-- 统计 -->
-      <view class="user-card__stats">
+      
+      <!-- 统计 - 仅登录显示 -->
+      <view v-if="isUserLoggedIn" class="user-card__stats">
         <view class="user-card__stat">
           <text class="user-card__stat-num">{{ stats.total }}</text>
           <text class="user-card__stat-label">亲属</text>
@@ -69,6 +113,11 @@ function onMenuTap(item: any) {
           <text class="user-card__stat-num">{{ stats.familyCount }}</text>
           <text class="user-card__stat-label">家族</text>
         </view>
+      </view>
+      
+      <!-- 未登录 - 登录按钮 -->
+      <view v-else class="user-card__login-btn" @tap.stop="goToLogin">
+        <text class="user-card__login-btn-text">立即登录</text>
       </view>
     </view>
 
@@ -89,8 +138,8 @@ function onMenuTap(item: any) {
       <text class="version__text">家族互联 v0.1.0</text>
     </view>
 
-    <!-- 退出 -->
-    <view class="logout" @tap="onLogout">
+    <!-- 退出登录 - 仅登录显示 -->
+    <view v-if="isUserLoggedIn" class="logout" @tap="onLogout">
       <text class="logout__text">退出登录</text>
     </view>
   </view>
@@ -114,6 +163,30 @@ function onMenuTap(item: any) {
   &__stat { flex: 1; text-align: center; }
   &__stat-num { display: block; font-size: $font-size-lg; font-weight: 700; color: #fff; }
   &__stat-label { font-size: $font-size-xs; color: rgba(255,255,255,0.7); }
+  &__login-btn {
+    position: relative; margin-top: $spacing-md;
+    padding: $spacing-base $spacing-lg; text-align: center;
+  }
+  &__login-btn-text {
+    color: #fff; font-size: $font-size-base;
+    background: rgba(255,255,255,0.2);
+    padding: $spacing-sm $spacing-xl;
+    border-radius: $radius-lg;
+  }
+}
+
+.avatar {
+  position: relative;
+  overflow: hidden;
+  
+  &-image {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+  }
 }
 
 .menu { margin: $spacing-base; padding: 0; }
