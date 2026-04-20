@@ -1,15 +1,9 @@
 <script setup lang="ts">
 /**
  * StarNet.vue — 家族星网可视化组件
- * 用 Canvas 2D 原生绘制，支持：
- *  - 力导向布局（简化版弹簧模型）
- *  - 点击节点切换中心
- *  - 拖拽节点
- *  - 双指缩放 + 单指平移
- *  - 关系线标签
- *  - 不同关系颜色
+ * 微信小程序兼容版本：使用 Canvas 2D 原生绘制
  */
-import { ref, watch, onMounted, onUnmounted, getCurrentInstance } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import type { GraphNode, GraphEdge } from '@/store/family'
 
 const props = defineProps<{
@@ -25,23 +19,19 @@ const emit = defineEmits<{
   (e: 'centerChange', nodeId: string): void
 }>()
 
-// ─── Canvas 状态 ─────────────────────────────────────────
-const canvasId = 'starnet-' + Math.random().toString(36).slice(2, 8)
-const instance = getCurrentInstance()
+// Canvas ID 使用固定值
+const canvasId = 'starnet-canvas'
+const canvasRef = ref<any>(null)
 
-let ctx: any = null
-let canvasWidth = 0
-let canvasHeight = 0
-let dpr = 1
-let animFrameId = 0
+// Canvas 状态
+let ctx: UniApp.CanvasContext | null = null
+let canvasWidth = 375
+let canvasHeight = 500
+let dpr = 2
 let isReady = false
+let animationTimer: any = null
 
-// ─── 视图变换 ─────────────────────────────────────────────
-let viewX = 0   // 平移 X
-let viewY = 0   // 平移 Y
-let viewScale = 1
-
-// ─── 节点物理位置 ─────────────────────────────────────────
+// 物理节点
 interface PhysNode {
   id: string
   x: number
@@ -53,452 +43,454 @@ interface PhysNode {
 }
 
 let physNodes: PhysNode[] = []
-let simRunning = false
 let simTick = 0
+let simRunning = false
 
-// ─── 交互状态 ─────────────────────────────────────────────
-let draggingNode: PhysNode | null = null
-let dragOffX = 0
-let dragOffY = 0
+// 交互状态
 let lastTouchX = 0
 let lastTouchY = 0
-let lastPinchDist = 0
-let touchStartTime = 0
-let touchMoved = false
+let lastTapTime = 0
+let touchStartX = 0
+let touchStartY = 0
 
-// ─── 颜色常量 ─────────────────────────────────────────────
-const COLOR_BG = '#FAF8F5'
-const COLOR_CENTER = '#F28C38'
-const COLOR_ME = '#F28C38'
-const COLOR_VERIFIED = '#4A90D9'
-const COLOR_UNVERIFIED = '#C5C0BA'
-const COLOR_TEXT = '#2D2A26'
-const COLOR_TEXT_LIGHT = '#8C8580'
-const COLOR_EDGE_UNVERIFIED = '#D0CBC4'
+// 视图变换
+let viewX = 0
+let viewY = 0
+let viewScale = 1
 
-// ─── 初始化 ───────────────────────────────────────────────
-function init() {
-  const query = uni.createSelectorQuery().in(instance?.proxy)
-  query.select(`#${canvasId}`).fields({ node: true, size: true }).exec((res: any[]) => {
-    if (!res?.[0]?.node) return
-    const canvas = res[0].node
-    dpr = uni.getSystemInfoSync().pixelRatio || 2
-    canvasWidth = res[0].width
-    canvasHeight = res[0].height
-    canvas.width = canvasWidth * dpr
-    canvas.height = canvasHeight * dpr
-    ctx = canvas.getContext('2d')
-    ctx.scale(dpr, dpr)
-    isReady = true
-    buildPhysNodes()
-    startSim()
-  })
+// 颜色常量
+const COLORS = {
+  bg: '#FAF8F5',
+  center: '#F28C38',
+  me: '#F28C38',
+  verified: '#4A90D9',
+  unverified: '#C5C0BA',
+  text: '#2D2A26',
+  textLight: '#8C8580',
+  edgeVerified: '#4A90D9',
+  edgeUnverified: '#D0CBC4',
+  father: '#4A90D9',
+  mother: '#E87D7D',
+  spouse: '#F28C38',
+  sibling: '#7B68EE',
+  other: '#8C8580'
 }
 
-// ─── 构建物理节点 ─────────────────────────────────────────
+// 关系颜色映射
+function getRelationColor(type: string): string {
+  const map: Record<string, string> = {
+    father: COLORS.father,
+    mother: COLORS.mother,
+    son: COLORS.father,
+    daughter: COLORS.mother,
+    husband: COLORS.spouse,
+    wife: COLORS.spouse,
+    brother: COLORS.sibling,
+    sister: COLORS.sibling,
+    grandfather: COLORS.father,
+    grandmother: COLORS.mother
+  }
+  return map[type] || COLORS.other
+}
+
+// 初始化 Canvas
+async function initCanvas() {
+  try {
+    const systemInfo = uni.getSystemInfoSync()
+    dpr = systemInfo.pixelRatio || 2
+    canvasWidth = props.width || systemInfo.windowWidth - 32
+    canvasHeight = props.height || 400
+    
+    // 使用 uni.createCanvasContext 兼容微信小程序
+    ctx = uni.createCanvasContext(canvasId)
+    
+    if (!ctx) {
+      console.error('[StarNet] Canvas context 创建失败')
+      return
+    }
+    
+    isReady = true
+    console.log('[StarNet] Canvas 初始化成功', { width: canvasWidth, height: canvasHeight })
+    
+    // 构建物理节点并启动模拟
+    buildPhysNodes()
+    startSimulation()
+  } catch (e) {
+    console.error('[StarNet] 初始化错误:', e)
+  }
+}
+
+// 构建物理节点
 function buildPhysNodes() {
   const cx = canvasWidth / 2
   const cy = canvasHeight / 2
   const count = props.nodes.length
-  const existing = new Map(physNodes.map(n => [n.id, n]))
-
+  
+  // 保留已有位置
+  const existing = new Map(physNodes.map(n => [n.id, { x: n.x, y: n.y }]))
+  
   physNodes = props.nodes.map((node, i) => {
-    if (existing.has(node.id)) {
-      const old = existing.get(node.id)!
-      old.data = node
-      old.radius = nodeRadius(node)
-      return old
+    const pos = existing.get(node.id)
+    if (pos && !isNaN(pos.x) && !isNaN(pos.y)) {
+      return {
+        id: node.id,
+        x: pos.x,
+        y: pos.y,
+        vx: 0,
+        vy: 0,
+        radius: getNodeRadius(node),
+        data: node
+      }
     }
-    // 新节点：以中心为基础随机散布
+    
+    // 新节点：圆形布局
+    const isCenter = node.id === props.centerId
     const angle = (i / count) * Math.PI * 2
-    const dist = node.id === props.centerId ? 0 : 80 + Math.random() * 60
+    const dist = isCenter ? 0 : 80 + Math.random() * 40
+    
     return {
       id: node.id,
       x: cx + Math.cos(angle) * dist,
       y: cy + Math.sin(angle) * dist,
-      vx: 0, vy: 0,
-      radius: nodeRadius(node),
-      data: node,
+      vx: 0,
+      vy: 0,
+      radius: getNodeRadius(node),
+      data: node
     }
   })
-
-  // 重置视图到中心
-  viewX = 0; viewY = 0; viewScale = 1
+  
+  // 重置视图
+  viewX = 0
+  viewY = 0
+  viewScale = 1
 }
 
-function nodeRadius(node: GraphNode): number {
-  if (node.isCenter) return 28
+function getNodeRadius(node: GraphNode): number {
+  if (node.isCenter || node.id === props.centerId) return 28
   if (node.isMe) return 24
   if (node.verified) return 20
   return 16
 }
 
-// ─── 力导向模拟 ───────────────────────────────────────────
-function startSim() {
-  simRunning = true
+// 力导向模拟
+function startSimulation() {
   simTick = 0
-  cancelAnimationFrame(animFrameId)
-  loop()
-}
-
-function loop() {
-  if (!isReady) return
-  tick()
-  draw()
-  if (simRunning && simTick < 200) {
-    animFrameId = requestAnimationFrame(loop)
-  } else {
-    simRunning = false
-    draw() // 最后一帧
+  simRunning = true
+  
+  // 使用 setTimeout 代替 requestAnimationFrame（小程序兼容性更好）
+  const step = () => {
+    if (!simRunning || simTick >= 150) {
+      simRunning = false
+      draw()
+      return
+    }
+    
+    tick()
+    draw()
+    simTick++
+    
+    animationTimer = setTimeout(step, 16) // ~60fps
   }
+  
+  step()
 }
 
 function tick() {
-  simTick++
-  const alpha = Math.max(0.01, 1 - simTick / 180)
   const cx = canvasWidth / 2
   const cy = canvasHeight / 2
-
-  // 找中心节点
-  const center = physNodes.find(n => n.id === props.centerId)
-
+  const alpha = Math.max(0.1, 1 - simTick / 120)
+  
   physNodes.forEach(n => {
-    if (n === draggingNode) return
-
+    // 中心节点固定
+    if (n.id === props.centerId) {
+      n.x = cx
+      n.y = cy
+      n.vx = 0
+      n.vy = 0
+      return
+    }
+    
     let fx = 0, fy = 0
-
-    // 1. 引力：拉向画布中心
-    const gravityStrength = n.id === props.centerId ? 0.3 : 0.05
+    
+    // 1. 向心力
+    const gravityStrength = 0.08
     fx += (cx - n.x) * gravityStrength
     fy += (cy - n.y) * gravityStrength
-
-    // 2. 弹簧：连接的节点互相吸引
+    
+    // 2. 弹簧力（连接的节点）
     props.edges.forEach(e => {
-      const isConnected = e.source === n.id || e.target === n.id
-      if (!isConnected) return
+      if (e.source !== n.id && e.target !== n.id) return
       const otherId = e.source === n.id ? e.target : e.source
       const other = physNodes.find(p => p.id === otherId)
       if (!other) return
+      
       const dx = other.x - n.x
       const dy = other.y - n.y
       const dist = Math.sqrt(dx * dx + dy * dy) || 1
-      const targetDist = n.id === props.centerId || other.id === props.centerId ? 110 : 140
-      const force = (dist - targetDist) * 0.04
+      const targetDist = 100
+      const force = (dist - targetDist) * 0.03
+      
       fx += (dx / dist) * force
       fy += (dy / dist) * force
     })
-
-    // 3. 斥力：所有节点互相排斥
+    
+    // 3. 斥力（所有节点互相排斥）
     physNodes.forEach(other => {
       if (other === n) return
       const dx = n.x - other.x
       const dy = n.y - other.y
       const dist2 = dx * dx + dy * dy || 1
-      const repulsion = 2800 / dist2
+      const repulsion = 2000 / dist2
+      
       fx += (dx / Math.sqrt(dist2)) * repulsion
       fy += (dy / Math.sqrt(dist2)) * repulsion
     })
-
-    // 4. 中心节点固定在画布中心
-    if (n.id === props.centerId) {
-      n.x += (cx - n.x) * 0.2
-      n.y += (cy - n.y) * 0.2
-      n.vx = 0; n.vy = 0
-      return
-    }
-
+    
+    // 更新速度和位置
     n.vx = (n.vx + fx) * 0.6 * alpha
     n.vy = (n.vy + fy) * 0.6 * alpha
     n.x += n.vx
     n.y += n.vy
-
+    
     // 边界约束
-    const pad = n.radius + 10
-    n.x = Math.max(pad, Math.min(canvasWidth - pad, n.x))
-    n.y = Math.max(pad, Math.min(canvasHeight - pad, n.y))
+    const padding = n.radius + 10
+    n.x = Math.max(padding, Math.min(canvasWidth - padding, n.x))
+    n.y = Math.max(padding, Math.min(canvasHeight - padding, n.y))
   })
 }
 
-// ─── 绘制 ─────────────────────────────────────────────────
+// 绘制
 function draw() {
-  if (!ctx) return
+  if (!ctx || !isReady) return
+  
+  // 清空画布
   ctx.clearRect(0, 0, canvasWidth, canvasHeight)
-
+  
+  // 绘制背景
+  ctx.setFillStyle(COLORS.bg)
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight)
+  
+  // 应用变换
   ctx.save()
   ctx.translate(viewX, viewY)
   ctx.scale(viewScale, viewScale)
-
+  
+  // 绘制边
   drawEdges()
+  
+  // 绘制节点
   drawNodes()
-
+  
   ctx.restore()
+  
+  // 提交绘制
+  ctx.draw()
 }
 
 function drawEdges() {
+  if (!ctx) return
+  
   props.edges.forEach(edge => {
     const src = physNodes.find(n => n.id === edge.source)
     const tgt = physNodes.find(n => n.id === edge.target)
     if (!src || !tgt) return
-
-    const dx = tgt.x - src.x
-    const dy = tgt.y - src.y
-    const dist = Math.sqrt(dx * dx + dy * dy) || 1
-
-    // 线条
-    ctx.beginPath()
-    ctx.moveTo(src.x, src.y)
-    ctx.lineTo(tgt.x, tgt.y)
-    ctx.strokeStyle = edge.verified ? edge.color : COLOR_EDGE_UNVERIFIED
-    ctx.lineWidth = edge.verified ? 2 : 1.5
-    ctx.setLineDash(edge.verified ? [] : [6, 4])
-    ctx.globalAlpha = edge.verified ? 0.85 : 0.5
-    ctx.stroke()
-    ctx.setLineDash([])
-    ctx.globalAlpha = 1
-
-    // 关系标签（线段中点）
+    
+    // 线条样式
+    ctx!.beginPath()
+    ctx!.moveTo(src.x, src.y)
+    ctx!.lineTo(tgt.x, tgt.y)
+    
+    const color = edge.verified ? getRelationColor(edge.type) : COLORS.edgeUnverified
+    ctx!.setStrokeStyle(color)
+    ctx!.setLineWidth(edge.verified ? 2 : 1.5)
+    
+    if (!edge.verified) {
+      ctx!.setLineDash([6, 4])
+    } else {
+      ctx!.setLineDash([])
+    }
+    
+    ctx!.setGlobalAlpha(edge.verified ? 0.8 : 0.5)
+    ctx!.stroke()
+    ctx!.setGlobalAlpha(1)
+    ctx!.setLineDash([])
+    
+    // 关系标签
     const mx = (src.x + tgt.x) / 2
     const my = (src.y + tgt.y) / 2
-    const label = edge.label
-    const fontSize = 10
-    ctx.font = `${fontSize}px sans-serif`
-    const tw = ctx.measureText(label).width
-    const pad = 4
-
-    // 标签背景
-    ctx.fillStyle = 'rgba(250,248,245,0.88)'
-    ctx.beginPath()
-    roundRect(ctx, mx - tw / 2 - pad, my - fontSize / 2 - pad, tw + pad * 2, fontSize + pad * 2, 4)
-    ctx.fill()
-
-    // 标签文字
-    ctx.fillStyle = edge.verified ? edge.color : COLOR_TEXT_LIGHT
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(label, mx, my)
+    
+    ctx!.setFillStyle('rgba(250,248,245,0.9)')
+    ctx!.fillRect(mx - 20, my - 8, 40, 16)
+    
+    ctx!.setFillStyle(edge.verified ? color : COLORS.textLight)
+    ctx!.setFontSize(10)
+    ctx!.setTextAlign('center')
+    ctx!.setTextBaseline('middle')
+    ctx!.fillText(edge.label, mx, my)
   })
 }
 
 function drawNodes() {
+  if (!ctx) return
+  
   physNodes.forEach(node => {
     const { x, y, radius, data } = node
     const isCenter = data.id === props.centerId
-
+    
     // 外圈光晕（中心节点）
     if (isCenter) {
-      ctx.beginPath()
-      ctx.arc(x, y, radius + 8, 0, Math.PI * 2)
-      ctx.fillStyle = 'rgba(242,140,56,0.15)'
-      ctx.fill()
+      ctx!.beginPath()
+      ctx!.arc(x, y, radius + 8, 0, Math.PI * 2)
+      ctx!.setFillStyle('rgba(242,140,56,0.15)')
+      ctx!.fill()
     }
-
+    
     // 节点圆
-    ctx.beginPath()
-    ctx.arc(x, y, radius, 0, Math.PI * 2)
-
-    if (isCenter) {
-      ctx.fillStyle = COLOR_CENTER
-    } else if (data.isMe) {
-      ctx.fillStyle = COLOR_ME
-    } else if (data.verified) {
-      ctx.fillStyle = COLOR_VERIFIED
-    } else {
-      ctx.fillStyle = COLOR_UNVERIFIED
-    }
-    ctx.fill()
-
+    ctx!.beginPath()
+    ctx!.arc(x, y, radius, 0, Math.PI * 2)
+    
+    let color = COLORS.unverified
+    if (isCenter) color = COLORS.center
+    else if (data.isMe) color = COLORS.me
+    else if (data.verified) color = COLORS.verified
+    
+    ctx!.setFillStyle(color)
+    ctx!.fill()
+    
     // 未验证虚线边框
     if (!data.verified && !isCenter) {
-      ctx.beginPath()
-      ctx.arc(x, y, radius + 2, 0, Math.PI * 2)
-      ctx.strokeStyle = '#C5C0BA'
-      ctx.lineWidth = 1.5
-      ctx.setLineDash([4, 3])
-      ctx.stroke()
-      ctx.setLineDash([])
+      ctx!.beginPath()
+      ctx!.arc(x, y, radius + 2, 0, Math.PI * 2)
+      ctx!.setStrokeStyle('#C5C0BA')
+      ctx!.setLineWidth(1.5)
+      ctx!.setLineDash([4, 3])
+      ctx!.stroke()
+      ctx!.setLineDash([])
     }
-
+    
     // 头像首字
-    ctx.fillStyle = '#fff'
-    ctx.font = `bold ${isCenter ? 14 : 12}px sans-serif`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(data.name.slice(0, 1), x, y)
-
-    // 名字标签（节点下方）
-    ctx.fillStyle = isCenter ? COLOR_CENTER : (data.verified ? COLOR_TEXT : COLOR_TEXT_LIGHT)
-    ctx.font = `${isCenter ? 13 : 11}px sans-serif`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'top'
-    ctx.fillText(data.name, x, y + radius + 4)
+    ctx!.setFillStyle('#ffffff')
+    ctx!.setFontSize(isCenter ? 14 : 12)
+    ctx!.setTextAlign('center')
+    ctx!.setTextBaseline('middle')
+    ctx!.fillText(data.name.slice(0, 1), x, y)
+    
+    // 名字标签
+    ctx!.setFillStyle(isCenter ? COLORS.center : (data.verified ? COLORS.text : COLORS.textLight))
+    ctx!.setFontSize(isCenter ? 12 : 10)
+    ctx!.setTextAlign('center')
+    ctx!.setTextBaseline('top')
+    ctx!.fillText(data.name, x, y + radius + 4)
   })
 }
 
-// ─── 圆角矩形辅助 ─────────────────────────────────────────
-function roundRect(c: any, x: number, y: number, w: number, h: number, r: number) {
-  c.moveTo(x + r, y)
-  c.lineTo(x + w - r, y)
-  c.quadraticCurveTo(x + w, y, x + w, y + r)
-  c.lineTo(x + w, y + h - r)
-  c.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
-  c.lineTo(x + r, y + h)
-  c.quadraticCurveTo(x, y + h, x, y + h - r)
-  c.lineTo(x, y + r)
-  c.quadraticCurveTo(x, y, x + r, y)
-  c.closePath()
+// 触摸事件
+function onTouchStart(e: any) {
+  const touch = e.touches?.[0] || e.mp?.touches?.[0]
+  if (!touch) return
+  
+  touchStartX = touch.x
+  touchStartY = touch.y
+  lastTouchX = touch.x
+  lastTouchY = touch.y
 }
 
-// ─── 坐标转换（屏幕 → 画布） ──────────────────────────────
-function screenToCanvas(sx: number, sy: number) {
-  return {
-    x: (sx - viewX) / viewScale,
-    y: (sy - viewY) / viewScale,
+function onTouchMove(e: any) {
+  const touch = e.touches?.[0] || e.mp?.touches?.[0]
+  if (!touch) return
+  
+  const dx = touch.x - lastTouchX
+  const dy = touch.y - lastTouchY
+  
+  viewX += dx
+  viewY += dy
+  
+  lastTouchX = touch.x
+  lastTouchY = touch.y
+  
+  if (!simRunning) draw()
+}
+
+function onTouchEnd(e: any) {
+  const touch = e.changedTouches?.[0] || e.mp?.changedTouches?.[0]
+  if (!touch) return
+  
+  const dx = Math.abs(touch.x - touchStartX)
+  const dy = Math.abs(touch.y - touchStartY)
+  const moved = dx > 10 || dy > 10
+  
+  // 如果没有移动，视为点击
+  if (!moved) {
+    handleTap(touch.x, touch.y)
   }
 }
 
-function hitTest(cx: number, cy: number): PhysNode | null {
+function handleTap(sx: number, sy: number) {
+  // 转换为画布坐标
+  const cx = (sx - viewX) / viewScale
+  const cy = (sy - viewY) / viewScale
+  
+  // 检测点击的节点
   for (let i = physNodes.length - 1; i >= 0; i--) {
     const n = physNodes[i]
     const dx = cx - n.x
     const dy = cy - n.y
-    if (dx * dx + dy * dy <= (n.radius + 8) ** 2) return n
-  }
-  return null
-}
-
-// ─── 触摸事件 ─────────────────────────────────────────────
-function onTouchStart(e: any) {
-  const touches = e.touches || e.mp?.touches || []
-  touchStartTime = Date.now()
-  touchMoved = false
-
-  if (touches.length === 1) {
-    const t = touches[0]
-    const { x, y } = screenToCanvas(t.x, t.y)
-    const hit = hitTest(x, y)
-    if (hit) {
-      draggingNode = hit
-      dragOffX = hit.x - x
-      dragOffY = hit.y - y
-    } else {
-      lastTouchX = t.x
-      lastTouchY = t.y
-    }
-  } else if (touches.length === 2) {
-    draggingNode = null
-    const dx = touches[1].x - touches[0].x
-    const dy = touches[1].y - touches[0].y
-    lastPinchDist = Math.sqrt(dx * dx + dy * dy)
-    lastTouchX = (touches[0].x + touches[1].x) / 2
-    lastTouchY = (touches[0].y + touches[1].y) / 2
-  }
-}
-
-function onTouchMove(e: any) {
-  const touches = e.touches || e.mp?.touches || []
-  touchMoved = true
-
-  if (touches.length === 1) {
-    const t = touches[0]
-    if (draggingNode) {
-      const { x, y } = screenToCanvas(t.x, t.y)
-      draggingNode.x = x + dragOffX
-      draggingNode.y = y + dragOffY
-      draggingNode.vx = 0
-      draggingNode.vy = 0
-      if (!simRunning) draw()
-    } else {
-      viewX += t.x - lastTouchX
-      viewY += t.y - lastTouchY
-      lastTouchX = t.x
-      lastTouchY = t.y
-      if (!simRunning) draw()
-    }
-  } else if (touches.length === 2) {
-    const dx = touches[1].x - touches[0].x
-    const dy = touches[1].y - touches[0].y
     const dist = Math.sqrt(dx * dx + dy * dy)
-    const midX = (touches[0].x + touches[1].x) / 2
-    const midY = (touches[0].y + touches[1].y) / 2
-
-    if (lastPinchDist > 0) {
-      const ratio = dist / lastPinchDist
-      const newScale = Math.max(0.3, Math.min(3, viewScale * ratio))
-      // 以双指中点为缩放中心
-      viewX = midX - (midX - viewX) * (newScale / viewScale)
-      viewY = midY - (midY - viewY) * (newScale / viewScale)
-      viewScale = newScale
-    }
-    lastPinchDist = dist
-    lastTouchX = midX
-    lastTouchY = midY
-    if (!simRunning) draw()
-  }
-}
-
-function onTouchEnd(e: any) {
-  const elapsed = Date.now() - touchStartTime
-  const wasDragging = draggingNode
-
-  if (draggingNode) {
-    draggingNode = null
-    // 拖拽结束后重新激活模拟
-    simTick = 150
-    simRunning = true
-    loop()
-  }
-
-  // 短按 + 未移动 = 点击
-  if (!touchMoved && elapsed < 300) {
-    const touches = e.changedTouches || e.mp?.changedTouches || []
-    if (touches.length === 1) {
-      const t = touches[0]
-      const { x, y } = screenToCanvas(t.x, t.y)
-      const hit = hitTest(x, y)
-      if (hit) {
-        handleNodeClick(hit)
+    
+    if (dist <= n.radius + 10) {
+      emit('nodeClick', n.data)
+      
+      // 双击切换中心
+      const now = Date.now()
+      if (now - lastTapTime < 300 && n.id !== props.centerId) {
+        emit('centerChange', n.id)
       }
+      lastTapTime = now
+      
+      return
     }
   }
 }
 
-function handleNodeClick(node: PhysNode) {
-  emit('nodeClick', node.data)
-  // 双击（快速两次点击）切换中心
-  if (node.id !== props.centerId) {
-    emit('centerChange', node.id)
-  }
-}
-
-// ─── 监听数据变化 ─────────────────────────────────────────
+// 监听数据变化
 watch(() => [props.nodes, props.edges, props.centerId], () => {
-  buildPhysNodes()
-  startSim()
+  if (isReady) {
+    buildPhysNodes()
+    startSimulation()
+  }
 }, { deep: true })
 
-// ─── 生命周期 ─────────────────────────────────────────────
+// 生命周期
 onMounted(() => {
-  // 延迟一帧确保 DOM 就绪
-  setTimeout(init, 100)
+  nextTick(() => {
+    setTimeout(initCanvas, 200)
+  })
 })
 
 onUnmounted(() => {
-  cancelAnimationFrame(animFrameId)
   simRunning = false
+  if (animationTimer) {
+    clearTimeout(animationTimer)
+  }
 })
 </script>
 
 <template>
   <view class="starnet">
     <canvas
-      :id="canvasId"
       :canvas-id="canvasId"
+      :id="canvasId"
       class="starnet__canvas"
-      type="2d"
+      :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }"
       @touchstart="onTouchStart"
       @touchmove="onTouchMove"
       @touchend="onTouchEnd"
     />
+    
+    <!-- 调试信息 -->
+    <view v-if="!isReady" class="starnet__loading">
+      <text class="starnet__loading-text">正在加载星网...</text>
+    </view>
   </view>
 </template>
 
@@ -512,9 +504,25 @@ onUnmounted(() => {
   overflow: hidden;
 
   &__canvas {
-    width: 100%;
-    height: 100%;
     display: block;
+    background: #FAF8F5;
+  }
+  
+  &__loading {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(250, 248, 245, 0.9);
+  }
+  
+  &__loading-text {
+    font-size: $font-size-base;
+    color: $color-text-secondary;
   }
 }
 </style>
